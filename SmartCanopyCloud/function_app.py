@@ -151,9 +151,10 @@ def SendWebCommand(req: func.HttpRequest) -> func.HttpResponse:
         req_body = req.get_json()
         command = req_body.get('command')
         device_id = req_body.get('device_id', 'esp32-weather')
+        source = req_body.get('source', 'web')
 
         if command:
-            send_c2d_command(device_id, command, "web")
+            send_c2d_command(device_id, command, source)
             global last_sent_command
             last_sent_command = command
             return func.HttpResponse(json.dumps({"status": "success", "message": f"Command '{command}' sent."}), mimetype="application/json", status_code=200, headers={"Access-Control-Allow-Origin": "*"})
