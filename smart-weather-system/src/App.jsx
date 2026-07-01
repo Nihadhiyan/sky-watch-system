@@ -1,22 +1,23 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
-  Shirt,
+  CloudSun,
   CloudRain,
+  Home,
+  Shirt,
+  Wind,
+  Thermometer,
+  Droplets,
+  Sun,
+  Activity,
+  RefreshCw,
+  AlertTriangle,
+  Radio,
   Maximize2,
   Minimize2,
-  Sun,
-  Moon,
   ShieldAlert,
-  Thermometer,
-  Activity,
-  Globe,
-  Home,
   BrainCircuit,
-  Wind,
-  Droplets,
-  RefreshCw,
   Sparkles,
-  AlertTriangle,
+  Globe,
 } from "lucide-react";
 import {
   LineChart,
@@ -32,22 +33,20 @@ import {
 // Realistic fallback telemetry data used if the live Azure Function is unreachable
 const FALLBACK_READINGS = [
   { time: "11:00", temp: 28.5, humidity: 64, light: 3200, rain: 4095, weight: 48000, satellite_rain: false, decision: "all_safe", system_active: true },
-  { time: "11:10", temp: 29.2, humidity: 65, light: 3400, rain: 4095, weight: 47500, satellite_rain: false, decision: "all_safe", system_active: true },
-  { time: "11:20", temp: 30.0, humidity: 66, light: 3500, rain: 4095, weight: 47000, satellite_rain: false, decision: "all_safe", system_active: true },
-  { time: "11:30", temp: 30.8, humidity: 68, light: 3600, rain: 4095, weight: 46500, satellite_rain: false, decision: "all_safe", system_active: true },
-  { time: "11:40", temp: 30.5, humidity: 72, light: 1200, rain: 4095, weight: 46500, satellite_rain: true, decision: "cover_clothesline", system_active: true },
-  { time: "11:50", temp: 27.5, humidity: 85, light: 300, rain: 2100, weight: 52000, satellite_rain: true, decision: "all_protect", system_active: true },
+  { time: "11:02", temp: 29.2, humidity: 65, light: 3400, rain: 4095, weight: 47500, satellite_rain: false, decision: "all_safe", system_active: true },
+  { time: "11:04", temp: 30.0, humidity: 66, light: 3500, rain: 4095, weight: 47000, satellite_rain: false, decision: "all_safe", system_active: true },
+  { time: "11:06", temp: 30.8, humidity: 68, light: 3600, rain: 4095, weight: 46500, satellite_rain: false, decision: "all_safe", system_active: true },
+  { time: "11:08", temp: 30.5, humidity: 72, light: 1200, rain: 4095, weight: 46500, satellite_rain: true, decision: "cover_clothesline", system_active: true },
+  { time: "11:10", temp: 27.5, humidity: 85, light: 300, rain: 2100, weight: 52000, satellite_rain: true, decision: "all_protect", system_active: true },
 ];
 
 // ── Endpoint configuration ──────────────────────────────────────────────────
-// Set VITE_API_BASE_URL in your .env file to point at Azure:
-//   VITE_API_BASE_URL=https://uok-weather-brain.azurewebsites.net
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ??
-  "http://localhost:7071";
+// Note: Hardcoded for preview compatibility. In your actual Vite project, 
+// you can switch this back to: import.meta.env.VITE_API_BASE_URL ?? "http://localhost:7071"
+const API_BASE = "http://localhost:7071"; 
 const SENSOR_ENDPOINT = `${API_BASE}/api/GetSensorData`;
 const COMMAND_ENDPOINT = `${API_BASE}/api/SendCommand`;
-const POLL_INTERVAL_MS = 5_000;
+const POLL_INTERVAL_MS = 2_000;
 
 // Sensor thresholds
 const NO_CLOTHES_THRESHOLD = 1_000;
@@ -55,27 +54,24 @@ const DRY_WEIGHT_THRESHOLD = 50_000;
 const WET_RAIN_THRESHOLD = 3_000;
 
 export default function App() {
+  // Telemetry history & connection state
   const [readings, setReadings] = useState(FALLBACK_READINGS);
-  const [systemActive, setSystemActive] = useState(true);
-  const [motorState, setMotorState] = useState({ clothesline: "INSIDE", window: "CLOSED" });
-  const overrideLock = useRef(false);
-
-  const [statusMessage, setStatusMessage] = useState("System ready and monitoring");
-  const [isCloudError, setIsCloudError] = useState(false);
-  const [isSendingCommand, setIsSendingCommand] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [connectionError, setConnectionError] = useState(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(new Date());
   const [now, setNow] = useState(new Date());
-  const [theme, setTheme] = useState("dark");
-  const isDark = theme === "dark";
 
-  // Tick the footer clock once a second.
+  // Command feedback tracking
+  const [isSendingCommand, setIsSendingCommand] = useState(false);
+  const [lastCommandStatus, setLastCommandStatus] = useState("Monitoring hardware state");
+
+  // Tick the clock every second
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  // Polling engine: fetch latest telemetry every 5s
+  // ── Database-First Polling Engine ──────────────────────────────────────────
   const syncReadings = useCallback(async () => {
     setIsSyncing(true);
     try {
@@ -104,35 +100,15 @@ export default function App() {
             };
           });
           setReadings(clean_data);
-
-          // 15-Second Lock Guard: When active, block syncReadings from overriding manual motor/system state
-          if (!overrideLock.current) {
-            const latest = clean_data[clean_data.length - 1];
-            const activeFlag = typeof latest.system_active === "boolean" ? latest.system_active : true;
-            setSystemActive(activeFlag);
-
-            if (activeFlag) {
-              const shouldOut = latest.decision === "all_safe" || latest.decision === "close_window";
-              const shouldOpen = latest.decision === "all_safe" || latest.decision === "cover_clothesline";
-              setMotorState({
-                clothesline: shouldOut ? "OUTSIDE" : "INSIDE",
-                window: shouldOpen ? "OPEN" : "CLOSED",
-              });
-            }
-          }
-          setIsCloudError(false);
+          setConnectionError(null);
           setLastSyncedAt(new Date());
-          setStatusMessage("Live telemetry synced");
+          setLastCommandStatus("Synchronized with cloud telemetry");
         }
       } else {
-        console.warn(`Backend responded with HTTP ${res.status}`);
-        setIsCloudError(true);
-        setStatusMessage("Connecting to Cloud…");
+        setConnectionError(`HTTP Error ${res.status}: Unable to reach hardware SENSOR API.`);
       }
-    } catch (err) {
-      console.warn(`Couldn't reach ${SENSOR_ENDPOINT}, staying on local fallback data.`, err);
-      setIsCloudError(true);
-      setStatusMessage("Connecting to Cloud…");
+    } catch {
+      setConnectionError("Hardware backend unreachable. Mirroring local offline state.");
     } finally {
       setIsSyncing(false);
     }
@@ -147,53 +123,46 @@ export default function App() {
     };
   }, [syncReadings]);
 
-  // ── Manual Command Handler with 15-Second Override Lock ─────────────────────
-  const sendCommand = async (command, label) => {
+  // ── Command Handling ────────────────────────────────────────────────────────
+  // We added a "source" parameter here. Default is "web".
+  const sendCommand = async (command, label, commandSource = "web") => {
     setIsSendingCommand(true);
-    setStatusMessage(`Sending command: ${label}…`);
-
-    // Engage 15-second override lock immediately to block background sync overwrites
-    overrideLock.current = true;
-    setTimeout(() => {
-      overrideLock.current = false;
-    }, 15000);
-
-    // Individual Motor & System State Logic
-    if (command === "all_safe") {
-      setSystemActive(true); // Force Everything Open resumes AI control
-      setMotorState({ clothesline: "OUTSIDE", window: "OPEN" });
-    } else if (command === "all_protect") {
-      setSystemActive(false); // Force Everything Closed pauses AI control
-      setMotorState({ clothesline: "INSIDE", window: "CLOSED" });
-    } else if (command === "uncover_clothesline") {
-      setMotorState((prev) => ({ ...prev, clothesline: "OUTSIDE" }));
-    } else if (command === "cover_clothesline") {
-      setMotorState((prev) => ({ ...prev, clothesline: "INSIDE" }));
-    } else if (command === "open_window") {
-      setMotorState((prev) => ({ ...prev, window: "OPEN" }));
-    } else if (command === "close_window") {
-      setMotorState((prev) => ({ ...prev, window: "CLOSED" }));
-    }
+    setLastCommandStatus(`Dispatching: ${label}…`);
 
     try {
       const res = await fetch(COMMAND_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command, device_id: "esp32-weather", source: "web" }),
+        // Passing our custom source to trick the ESP32 into not pausing the AI for individual motors
+        body: JSON.stringify({ command, device_id: "esp32-weather", source: commandSource }),
       });
-      setStatusMessage(res.ok ? `${label} sent` : "Command failed — is the Function app running?");
+      if (res.ok) {
+        setLastCommandStatus(`Sent "${label}". Awaiting hardware response…`);
+      } else {
+        setLastCommandStatus(`Failed to send "${label}" (HTTP ${res.status})`);
+      }
     } catch (err) {
-      console.error("Command error:", err);
-      setStatusMessage(`Offline demo mode — pretending to run "${label}"`);
+      console.error("Command execution failure:", err);
+      setLastCommandStatus(`Command "${label}" queued in offline demo mode.`);
     } finally {
       setIsSendingCommand(false);
     }
   };
 
+  // Extract latest hardware state strictly from database
   const latest = readings.length > 0 ? readings[readings.length - 1] : undefined;
 
-  // ── 3-tier clothes weight logic ────────────────────────────────────────────
-  const weightValue = latest ? latest.weight : 0;
+  // Derive physical hardware state strictly from backend telemetry mirror
+  const clotheslineState =
+    latest?.clothesline_state ??
+    (latest?.decision === "all_safe" || latest?.decision === "close_window" ? "OUTSIDE" : "INSIDE");
+
+  const windowState =
+    latest?.window_state ??
+    (latest?.decision === "all_safe" || latest?.decision === "cover_clothesline" ? "OPEN" : "CLOSED");
+
+  // 3-Tier Clothes Weight Logic
+  const weightValue = latest?.weight ?? 0;
   const hasClothes = weightValue > NO_CLOTHES_THRESHOLD;
   const isWet = weightValue >= DRY_WEIGHT_THRESHOLD;
   const isDry = hasClothes && !isWet;
@@ -202,92 +171,35 @@ export default function App() {
   const isRainForecast = latest ? latest.satellite_rain === true : false;
 
   const explainLatestDecision = () => {
-    if (!latest) return "Waiting on the first sensor reading before deciding anything...";
+    if (!latest) return "Waiting for hardware telemetry broadcast...";
     switch (latest.decision) {
       case "all_safe":
-        if (!hasClothes) return "The weather is clear — beautiful day outside! The clothesline is OUTSIDE and window is OPEN for fresh air.";
-        if (isDry) return "The weather's clear and your clothes are drying nicely! Clothesline stays OUTSIDE, window stays OPEN.";
-        return "The weather is clear — great time to dry those clothes! Clothesline is OUTSIDE and window is OPEN.";
+        if (!hasClothes) return "Clear skies detected. Clothesline is OUTSIDE and window is OPEN for fresh airflow.";
+        if (isDry) return "Optimal drying conditions. Clothes are dry on the line outside. Window stays OPEN.";
+        return "Weather is clear. Clothes drying outside. Window is OPEN.";
       case "all_protect":
-        if (!hasClothes) return "Rain or rough conditions detected — closed the window to protect the house. Clothesline is INSIDE (nothing on it anyway).";
-        if (isDry) return "Rain approaching — your clothes are already dry so I pulled them INSIDE. Window is CLOSED to protect the house.";
-        return "Rain or rough conditions detected — I've pulled the clothesline INSIDE and closed the window to keep everything protected.";
+        if (!hasClothes) return "Adverse weather or precipitation detected. House sealed with window CLOSED and line pulled INSIDE.";
+        if (isDry) return "Rain approaching. Dry laundry pulled INSIDE safely. Window CLOSED.";
+        return "Storm protection active. Clothesline retracted INSIDE and window CLOSED.";
       case "close_window":
-        if (!hasClothes) return "The clothesline is OUTSIDE (empty), window is CLOSED to keep out drafts and moisture.";
-        if (isDry) return "Clothes are dry and OUTSIDE. Window is CLOSED to stop moisture getting in — perfect conditions.";
-        return "Your clothes are still OUTSIDE drying, but I closed the window to keep drafts and moisture out.";
+        return "Laundry drying OUTSIDE in clear conditions, but window is CLOSED to prevent humidity ingress.";
       case "cover_clothesline":
-        if (!hasClothes) return "Brought the clothesline INSIDE as a precaution (nothing on it). Window is OPEN for airflow.";
-        if (isDry) return "Your laundry's already dry — brought the clothesline INSIDE to keep it safe. Window stays OPEN for airflow.";
-        return "I brought the clothesline INSIDE to keep your clothes from getting soaked, but left the window OPEN for airflow.";
+        return "Clothesline pulled INSIDE to shield laundry from moisture. Window remains OPEN for room ventilation.";
       default:
-        if (isRainingLocally) return "Rain on the rooftop sensor — defenses are up to protect the laundry and the house.";
-        if (isRainForecast) return "Satellite radar shows rain moving in. Getting ahead of it.";
-        return `Monitoring as usual: clothesline is ${motorState.clothesline}, window is ${motorState.window}.`;
+        return `Mirroring IoT state: Clothesline is ${clotheslineState}, Window is ${windowState}.`;
     }
   };
 
-  // --- Theme tokens -------------------------------------------------------
-  const t = {
-    wrapper: isDark
-      ? "min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 font-sans selection:bg-emerald-500/30 transition-colors duration-300"
-      : "min-h-screen bg-gradient-to-br from-slate-100 via-sky-50/50 to-slate-200 text-slate-800 p-4 md:p-8 font-sans selection:bg-emerald-500/30 transition-colors duration-300",
-    navbar: isDark
-      ? "bg-slate-900/60 backdrop-blur-xl border-slate-800/80 shadow-2xl"
-      : "bg-white/80 backdrop-blur-xl border-slate-200/80 shadow-xl shadow-slate-200/50",
-    navTitle: isDark ? "from-sky-400 via-indigo-400 to-purple-400" : "from-sky-600 via-indigo-600 to-purple-600",
-    navSub: isDark ? "text-slate-400" : "text-slate-600 font-medium",
-    badge: isDark ? "bg-slate-950/80 border-slate-800 text-slate-400" : "bg-slate-100/90 border-slate-200/80 text-slate-600 shadow-sm",
-    refreshBtn: isDark ? "text-slate-300 hover:text-white" : "text-slate-700 hover:text-slate-950 font-medium",
-    statusPill: isDark
-      ? "bg-slate-950/80 border-slate-800 shadow-inner text-slate-300"
-      : "bg-slate-100/90 border-slate-200/80 shadow-sm text-slate-700",
-    sectionHeading: isDark ? "text-slate-500" : "text-slate-500 font-bold",
-    card: isDark
-      ? "bg-slate-900/70 backdrop-blur-md border-slate-800/80 shadow-xl hover:border-slate-700"
-      : "bg-white/85 backdrop-blur-md border-slate-200/80 shadow-lg shadow-slate-200/40 hover:border-slate-300",
-    cardHeader: isDark ? "text-slate-400" : "text-slate-600 font-bold",
-    cardSub: isDark ? "text-slate-500" : "text-slate-500 font-medium",
-    telemetryCard: isDark
-      ? "bg-slate-900/60 backdrop-blur-md border border-slate-800/70 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:border-slate-700/80 transition-all"
-      : "bg-white/75 backdrop-blur-md border border-slate-200/80 rounded-2xl p-4 flex items-center justify-between shadow-sm hover:border-slate-300 transition-all",
-    telemetryLabel: isDark ? "text-xs font-semibold text-slate-400" : "text-xs font-bold text-slate-500",
-    telemetryValue: isDark ? "text-base md:text-lg font-mono font-extrabold text-slate-200" : "text-base md:text-lg font-mono font-extrabold text-slate-800",
-    aiBanner: isDark
-      ? "bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800/90 border-slate-700/80 shadow-2xl"
-      : "bg-gradient-to-br from-white via-slate-50 to-blue-50/50 border-slate-200/80 shadow-xl shadow-slate-200/50",
-    aiTitle: isDark ? "text-white" : "text-slate-900",
-    aiSub: isDark ? "text-slate-400" : "text-slate-600",
-    aiCallout: isDark ? "bg-slate-950/70 border-slate-800 text-slate-100 shadow-inner" : "bg-white/95 border-slate-200/80 text-slate-800 shadow-sm",
-    aiCodeBadge: isDark ? "bg-slate-900 border-slate-800 text-slate-400" : "bg-slate-100 border-slate-200 text-slate-700 font-medium",
-    chartTitle: isDark ? "text-white" : "text-slate-900",
-    chartSub: isDark ? "text-slate-400" : "text-slate-500 font-medium",
-    chartGrid: isDark ? "#1e293b" : "#cbd5e1",
-    chartAxis: isDark ? "#94a3b8" : "#475569",
-    chartTooltipBg: isDark ? "#0f172a" : "#ffffff",
-    chartTooltipBorder: isDark ? "#334155" : "#cbd5e1",
-    chartTooltipColor: isDark ? "#f8fafc" : "#0f172a",
-    manualPanel: isDark ? "bg-slate-900/80 backdrop-blur-xl border-slate-800 shadow-xl" : "bg-white/85 backdrop-blur-xl border-slate-200/80 shadow-xl shadow-slate-200/50",
-    manualTitle: isDark ? "text-white" : "text-slate-900",
-    manualSub: isDark ? "text-slate-400" : "text-slate-600",
-    manualBtn: isDark
-      ? "bg-slate-950/80 hover:bg-slate-800 text-slate-200 border-slate-800 hover:border-slate-600"
-      : "bg-slate-50 hover:bg-slate-100 text-slate-800 border-slate-200 hover:border-slate-300 shadow-sm",
-    footerBorder: isDark ? "border-slate-900" : "border-slate-200",
-    footerText: isDark ? "text-slate-500" : "text-slate-500 font-medium",
-    footerTime: isDark ? "text-slate-300" : "text-slate-700 font-bold",
-  };
-
   return (
-    <div className={t.wrapper}>
+    <div className="min-h-screen bg-slate-900 text-slate-100 p-4 md:p-8 font-sans selection:bg-indigo-500/30 transition-colors duration-300">
       {/* Non-intrusive Connection / Error Alert Banner */}
-      {isCloudError && (
+      {connectionError && (
         <div className="max-w-7xl mx-auto mb-6 p-4 rounded-2xl bg-rose-950/80 border border-rose-700/60 backdrop-blur-md flex items-center justify-between text-rose-200 shadow-xl transition-all duration-300">
           <div className="flex items-center space-x-3">
             <AlertTriangle className="w-6 h-6 text-rose-400 flex-shrink-0 animate-pulse" />
             <div>
               <p className="text-sm font-bold">Hardware Connection Interrupted</p>
-              <p className="text-xs text-rose-300/90">Backend unreachable. Mirroring offline fallback data.</p>
+              <p className="text-xs text-rose-300/90">{connectionError}</p>
             </div>
           </div>
           <button
@@ -299,224 +211,257 @@ export default function App() {
         </div>
       )}
 
-      {/* Header / navbar */}
+      {/* Header / Navbar */}
       <header className="max-w-7xl mx-auto mb-8">
-        <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 rounded-3xl transition-all duration-300 ${t.navbar}`}>
-          <div className="flex items-center space-x-3">
-            <div className="p-2.5 bg-gradient-to-br from-blue-500 to-emerald-500 rounded-2xl shadow-lg shadow-emerald-500/20">
-              <Home className="w-7 h-7 text-white" />
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 rounded-2xl bg-slate-900/80 backdrop-blur-xl border border-slate-700 shadow-2xl">
+          <div className="flex items-center space-x-3.5">
+            <div className="p-3 bg-gradient-to-br from-sky-500 via-indigo-500 to-purple-600 rounded-2xl shadow-lg shadow-indigo-500/25">
+              <Radio className="w-7 h-7 text-white animate-pulse" />
             </div>
             <div>
-              <h1 className={`text-3xl md:text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r tracking-tight ${t.navTitle}`}>
+              <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-sky-400 via-indigo-400 to-purple-400">
                 Sky Watch
               </h1>
-              <p className={`text-sm md:text-base flex items-center mt-0.5 ${t.navSub}`}>
-                Autonomous home &amp; laundry dashboard
+              <p className="text-xs md:text-sm text-slate-400 font-medium flex items-center mt-0.5">
+                Enterprise IoT Telemetry &amp; Autonomous Control Mirror
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => setTheme(isDark ? "light" : "dark")}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl border transition-all duration-200 shadow-sm active:scale-95 ${
-                isDark
-                  ? "bg-slate-950/80 border-slate-800 text-amber-400 hover:bg-slate-800 hover:border-slate-700"
-                  : "bg-slate-100/90 border-slate-200 text-amber-600 hover:bg-slate-200 hover:border-slate-300"
-              }`}
-              title={`Switch to ${isDark ? "light" : "dark"} mode`}
-            >
-              {isDark ? (
-                <>
-                  <Sun className="w-4 h-4" />
-                  <span className="text-xs font-semibold text-slate-300">Light mode</span>
-                </>
-              ) : (
-                <>
-                  <Moon className="w-4 h-4 text-indigo-600" />
-                  <span className="text-xs font-semibold text-slate-700">Dark mode</span>
-                </>
-              )}
-            </button>
-
-            <div className={`flex items-center space-x-2 px-4 py-2 rounded-xl border text-xs ${t.badge}`}>
-              <RefreshCw className={`w-3.5 h-3.5 text-blue-400 ${isSyncing ? "animate-spin" : ""}`} />
-              <span>Updated {lastSyncedAt.toLocaleTimeString()}</span>
-              <button onClick={syncReadings} disabled={isSyncing} className={`ml-1 underline decoration-slate-500 transition-colors ${t.refreshBtn}`}>
-                Refresh
-              </button>
+            <div className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-slate-950/80 border border-slate-700/80 text-xs text-slate-400 shadow-inner">
+              <RefreshCw className={`w-3.5 h-3.5 text-sky-400 ${isSyncing ? "animate-spin" : ""}`} />
+              <span>Polling: 2s interval</span>
+              <span className="text-slate-600">|</span>
+              <span>Sync: {lastSyncedAt.toLocaleTimeString()}</span>
             </div>
 
-            <div className={`flex items-center space-x-2.5 px-4 py-2 rounded-xl border ${t.statusPill}`}>
+            <div className="flex items-center space-x-2.5 px-4 py-2 rounded-xl bg-slate-950/80 border border-slate-700/80 shadow-inner">
               <div
                 className={`w-2.5 h-2.5 rounded-full ${
-                  isCloudError
+                  connectionError
                     ? "bg-rose-500 animate-pulse"
-                    : isSendingCommand || isSyncing
+                    : isSendingCommand
                     ? "bg-amber-400 animate-ping"
                     : "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]"
                 }`}
               />
-              <span className={`text-xs font-semibold tracking-wide ${isDark ? "text-slate-300" : "text-slate-700"}`}>{statusMessage}</span>
+              <span className="text-xs font-semibold text-slate-300 tracking-wide">
+                {isSyncing ? "Syncing…" : lastCommandStatus}
+              </span>
             </div>
           </div>
         </div>
       </header>
 
-      {/* At-a-glance status cards */}
-      <section className="max-w-7xl mx-auto mb-8">
-        <h2 className={`text-xs font-bold uppercase tracking-widest mb-3 px-1 ${t.sectionHeading}`}>Instant house status</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {/* Clothes status — 3-tier: No clothes / Dry / Wet */}
-          <div className={`rounded-3xl p-6 relative overflow-hidden group transition-all ${t.card}`}>
+      {/* Responsive Grid Layout: 3 Columns for Motors & Weather Override */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        
+        {/* Mirror Card 1: Clothesline Status & Position */}
+        <div className="rounded-2xl p-6 bg-slate-900/80 border border-slate-700 shadow-xl flex flex-col justify-between transition-all hover:border-slate-600">
+          <div>
             <div className="flex items-center justify-between mb-4">
-              <span className={`text-sm ${t.cardHeader}`}>Clothes status</span>
-              <div
-                className={`p-3 rounded-2xl ${
-                  !hasClothes
-                    ? isDark
-                      ? "bg-slate-800 text-slate-400 border border-slate-700"
-                      : "bg-slate-100 text-slate-400 border border-slate-200"
-                    : isDry
-                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
-                    : "bg-sky-500/10 text-sky-500 border border-sky-500/20"
-                }`}
-              >
-                <Shirt className="w-6 h-6" />
+              <div className="flex items-center space-x-2.5">
+                <div className={`p-3 rounded-2xl border ${clotheslineState === "OUTSIDE" ? "bg-amber-500/10 text-amber-400 border-amber-500/30" : "bg-slate-800 text-slate-300 border-slate-700"}`}>
+                  {clotheslineState === "OUTSIDE" ? <Maximize2 className="w-6 h-6" /> : <Minimize2 className="w-6 h-6" />}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Clothesline Motor</h3>
+                  <p className="text-2xl font-extrabold tracking-tight mt-0.5 text-slate-100">
+                    {clotheslineState === "OUTSIDE" ? "Outside (Extended)" : "Inside (Retracted)"}
+                  </p>
+                </div>
               </div>
             </div>
-            <h3
-              className={`text-2xl md:text-3xl font-extrabold tracking-tight ${
-                !hasClothes
-                  ? isDark ? "text-slate-400" : "text-slate-500"
-                  : isDry
-                  ? isDark ? "text-emerald-400" : "text-emerald-600"
-                  : isDark ? "text-sky-400" : "text-sky-600"
-              }`}
+
+            <div className="mt-4 p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs">
+              <span className="text-slate-400 flex items-center">
+                <Shirt className="w-4 h-4 mr-1.5 text-purple-400" /> Status:
+              </span>
+              <span className={`px-2 py-1 rounded-md font-bold border ${!hasClothes ? "bg-slate-800 text-slate-400 border-slate-700" : isDry ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-sky-500/10 text-sky-400 border-sky-500/30"}`}>
+                {!hasClothes ? "Empty Line" : isDry ? "Clothes Dry" : "Clothes Wet"}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-4 border-t border-slate-800 grid grid-cols-2 gap-3">
+            {/* NOTE: Sent as "web_individual" so AI does NOT pause! */}
+            <button
+              onClick={() => sendCommand("uncover_clothesline", "Extend Clothesline", "web_individual")}
+              disabled={isSendingCommand}
+              className="py-3 px-3 rounded-xl bg-slate-950/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-slate-200 transition-all flex items-center justify-center space-x-2 active:scale-95 disabled:opacity-50"
             >
-              {!hasClothes ? "No clothes on line" : isDry ? "Clothes are dry" : "Clothes are wet"}
-            </h3>
-            <p className={`text-xs mt-2 flex items-center ${t.cardSub}`}>
-              <span
-                className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
-                  !hasClothes ? "bg-slate-500" : isDry ? "bg-emerald-500" : "bg-sky-500"
-                }`}
-              />
-              Weight sensor: {latest ? `${latest.weight} ADC` : "no reading"}
-            </p>
-          </div>
-
-          {/* Clothesline position */}
-          <div className={`rounded-3xl p-6 relative overflow-hidden group transition-all ${t.card}`}>
-            <div className="flex items-center justify-between mb-4">
-              <span className={`text-sm ${t.cardHeader}`}>Clothesline position</span>
-              <div className={`p-3 rounded-2xl ${motorState.clothesline === "OUTSIDE" ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : isDark ? "bg-slate-800 text-slate-300 border border-slate-700" : "bg-slate-100 text-slate-600 border border-slate-200"}`}>
-                {motorState.clothesline === "OUTSIDE" ? <Maximize2 className="w-6 h-6" /> : <Minimize2 className="w-6 h-6" />}
-              </div>
-            </div>
-            <h3 className={`text-2xl md:text-3xl font-extrabold tracking-tight ${motorState.clothesline === "OUTSIDE" ? (isDark ? "text-amber-400" : "text-amber-600") : isDark ? "text-slate-200" : "text-slate-800"}`}>
-              {motorState.clothesline === "OUTSIDE" ? "Outside (drying)" : "Inside (protected)"}
-            </h3>
-            <p className={`text-xs mt-2 flex items-center ${t.cardSub}`}>
-              <Wind className="w-3.5 h-3.5 mr-1" />
-              Motorized clothesline track
-            </p>
-          </div>
-
-          {/* Window position */}
-          <div className={`rounded-3xl p-6 relative overflow-hidden group transition-all ${t.card}`}>
-            <div className="flex items-center justify-between mb-4">
-              <span className={`text-sm ${t.cardHeader}`}>Window position</span>
-              <div className={`p-3 rounded-2xl ${motorState.window === "OPEN" ? "bg-teal-500/10 text-teal-500 border border-teal-500/20" : "bg-indigo-500/10 text-indigo-500 border border-indigo-500/20"}`}>
-                <Home className="w-6 h-6" />
-              </div>
-            </div>
-            <h3 className={`text-2xl md:text-3xl font-extrabold tracking-tight ${motorState.window === "OPEN" ? (isDark ? "text-teal-400" : "text-teal-600") : isDark ? "text-indigo-300" : "text-indigo-600"}`}>
-              {motorState.window === "OPEN" ? "Open" : "Closed"}
-            </h3>
-            <p className={`text-xs mt-2 flex items-center ${t.cardSub}`}>
-              <Activity className="w-3.5 h-3.5 mr-1" />
-              {motorState.window === "OPEN" ? "Fresh air ventilation active" : "Draft & storm protection active"}
-            </p>
-          </div>
-
-          {/* Current weather */}
-          <div className={`rounded-3xl p-6 relative overflow-hidden group transition-all ${t.card}`}>
-            <div className="flex items-center justify-between mb-4">
-              <span className={`text-sm ${t.cardHeader}`}>Current weather</span>
-              <div className={`p-3 rounded-2xl ${isRainingLocally ? "bg-blue-500/10 text-blue-500 border border-blue-500/20" : "bg-amber-500/10 text-amber-500 border border-amber-500/20"}`}>
-                {isRainingLocally ? <CloudRain className="w-6 h-6" /> : <Sun className="w-6 h-6" />}
-              </div>
-            </div>
-            <h3 className={`text-2xl md:text-3xl font-extrabold tracking-tight ${isRainingLocally ? (isDark ? "text-blue-400" : "text-blue-600") : isDark ? "text-amber-400" : "text-amber-600"}`}>
-              {isRainingLocally ? "Raining locally" : "Clear"}
-            </h3>
-            <p className={`text-xs mt-2 flex items-center ${t.cardSub}`}>
-              <Droplets className="w-3.5 h-3.5 mr-1" />
-              Rooftop rain sensor: {latest ? `${latest.rain} ADC` : "n/a"}
-            </p>
+              <Maximize2 className="w-4 h-4 text-amber-400" />
+              <span>Extend</span>
+            </button>
+            <button
+              onClick={() => sendCommand("cover_clothesline", "Retract Clothesline", "web_individual")}
+              disabled={isSendingCommand}
+              className="py-3 px-3 rounded-xl bg-slate-950/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-slate-200 transition-all flex items-center justify-center space-x-2 active:scale-95 disabled:opacity-50"
+            >
+              <Minimize2 className="w-4 h-4 text-slate-400" />
+              <span>Retract</span>
+            </button>
           </div>
         </div>
-      </section>
 
-      {/* Live telemetry tiles */}
+        {/* Mirror Card 2: Motorized Window Status */}
+        <div className="rounded-2xl p-6 bg-slate-900/80 border border-slate-700 shadow-xl flex flex-col justify-between transition-all hover:border-slate-600">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-2.5">
+                <div className={`p-3 rounded-2xl border ${windowState === "OPEN" ? "bg-teal-500/10 text-teal-400 border-teal-500/30" : "bg-indigo-500/10 text-indigo-400 border-indigo-500/30"}`}>
+                  <Home className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Actuated Window</h3>
+                  <p className="text-2xl font-extrabold tracking-tight mt-0.5 text-slate-100">
+                    {windowState === "OPEN" ? "Open (Ventilating)" : "Closed (Sealed)"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs">
+              <span className="text-slate-400 flex items-center">
+                <Activity className="w-4 h-4 mr-1.5 text-teal-400" /> System Mode:
+              </span>
+              <span className={`font-semibold ${latest?.system_active ? "text-purple-400" : "text-amber-400"}`}>
+                {latest?.system_active ? "AI Autonomous Active" : "Manual Override"}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-4 border-t border-slate-800 grid grid-cols-2 gap-3">
+            {/* NOTE: Sent as "web_individual" so AI does NOT pause! */}
+            <button
+              onClick={() => sendCommand("open_window", "Open Window", "web_individual")}
+              disabled={isSendingCommand}
+              className="py-3 px-3 rounded-xl bg-slate-950/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-slate-200 transition-all flex items-center justify-center space-x-2 active:scale-95 disabled:opacity-50"
+            >
+              <Wind className="w-4 h-4 text-teal-400" />
+              <span>Open (0°)</span>
+            </button>
+            <button
+              onClick={() => sendCommand("close_window", "Close Window", "web_individual")}
+              disabled={isSendingCommand}
+              className="py-3 px-3 rounded-xl bg-slate-950/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-slate-200 transition-all flex items-center justify-center space-x-2 active:scale-95 disabled:opacity-50"
+            >
+              <Home className="w-4 h-4 text-indigo-400" />
+              <span>Close (90°)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Mirror Card 3: Weather & Master Override */}
+        <div className="rounded-2xl p-6 bg-slate-900/80 border border-slate-700 shadow-xl flex flex-col justify-between transition-all hover:border-slate-600">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-2.5">
+                <div className={`p-3 rounded-2xl border ${isRainingLocally ? "bg-blue-500/10 text-blue-400 border-blue-500/30" : "bg-amber-500/10 text-amber-400 border-amber-500/30"}`}>
+                  {isRainingLocally ? <CloudRain className="w-6 h-6" /> : <Sun className="w-6 h-6" />}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Weather Status</h3>
+                  <p className={`text-2xl font-extrabold tracking-tight mt-0.5 ${isRainingLocally ? "text-blue-400" : "text-amber-400"}`}>
+                    {isRainingLocally ? "Raining Locally" : "Clear Skies"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs">
+              <span className="text-slate-400 flex items-center">
+                <Globe className="w-4 h-4 mr-1.5 text-indigo-400" /> Satellite Radar:
+              </span>
+              <span className={`font-semibold ${isRainForecast ? "text-rose-400" : "text-emerald-400"}`}>
+                {isRainForecast ? "Storm Approaching" : "No Rain Expected"}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-4 border-t border-slate-800 space-y-3">
+            {/* NOTE: Sent as "web" - This will RESUME the AI and open everything */}
+            <button
+              onClick={() => sendCommand("all_safe", "Force everything open", "web")}
+              disabled={isSendingCommand}
+              className="w-full flex items-center justify-center space-x-2 p-3 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white rounded-xl transition-all font-bold shadow-lg shadow-emerald-600/25 active:scale-95 disabled:opacity-50"
+            >
+              <Sun className="w-4 h-4" />
+              <span>Force All OPEN (Resume AI)</span>
+            </button>
+            {/* NOTE: Sent as "web" - This will PAUSE the AI and close everything */}
+            <button
+              onClick={() => sendCommand("all_protect", "Force everything closed", "web")}
+              disabled={isSendingCommand}
+              className="w-full flex items-center justify-center space-x-2 p-3 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white rounded-xl transition-all font-bold shadow-lg shadow-rose-600/25 active:scale-95 disabled:opacity-50"
+            >
+              <ShieldAlert className="w-4 h-4" />
+              <span>Force All CLOSED (Pause AI)</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      {/* Live Hardware Telemetry Grid */}
       <section className="max-w-7xl mx-auto mb-8">
-        <h3 className={`text-xs font-bold uppercase tracking-widest mb-2.5 px-1 ${t.sectionHeading}`}>Live hardware telemetry</h3>
+        <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3 px-1">IoT Telemetry Feed</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className={t.telemetryCard}>
+          <div className="bg-slate-900/70 border border-slate-700 rounded-2xl p-4 flex items-center justify-between shadow-lg">
             <div className="flex items-center space-x-3">
-              <div className="p-2 bg-rose-500/10 rounded-xl border border-rose-500/20 text-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.15)]">
+              <div className="p-2.5 bg-rose-500/10 rounded-xl border border-rose-500/20 text-rose-400">
                 <Thermometer className="w-5 h-5" />
               </div>
               <div>
-                <span className={t.telemetryLabel}>Temperature</span>
-                <div className={t.telemetryValue}>{latest ? `${latest.temp} °C` : "--"}</div>
+                <span className="text-xs font-semibold text-slate-400">Ambient Temp</span>
+                <div className="text-lg font-mono font-extrabold text-slate-100">{latest ? `${latest.temp} °C` : "--"}</div>
               </div>
             </div>
           </div>
 
-          <div className={t.telemetryCard}>
+          <div className="bg-slate-900/70 border border-slate-700 rounded-2xl p-4 flex items-center justify-between shadow-lg">
             <div className="flex items-center space-x-3">
-              <div className="p-2 bg-sky-500/10 rounded-xl border border-sky-500/20 text-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.15)]">
+              <div className="p-2.5 bg-sky-500/10 rounded-xl border border-sky-500/20 text-sky-400">
                 <Droplets className="w-5 h-5" />
               </div>
               <div>
-                <span className={t.telemetryLabel}>Humidity</span>
-                <div className={t.telemetryValue}>{latest ? `${latest.humidity} %` : "--"}</div>
+                <span className="text-xs font-semibold text-slate-400">Relative Humidity</span>
+                <div className="text-lg font-mono font-extrabold text-slate-100">{latest ? `${latest.humidity} %` : "--"}</div>
               </div>
             </div>
           </div>
 
-          <div className={t.telemetryCard}>
+          <div className="bg-slate-900/70 border border-slate-700 rounded-2xl p-4 flex items-center justify-between shadow-lg">
             <div className="flex items-center space-x-3">
-              <div className="p-2 bg-amber-500/10 rounded-xl border border-amber-500/20 text-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.15)]">
-                <Sun className="w-5 h-5" />
+              <div className="p-2.5 bg-amber-500/10 rounded-xl border border-amber-500/20 text-amber-400">
+                <CloudSun className="w-5 h-5" />
               </div>
               <div>
-                <span className={t.telemetryLabel}>Light level</span>
-                <div className={t.telemetryValue}>{latest ? `${latest.light} ADC` : "--"}</div>
+                <span className="text-xs font-semibold text-slate-400">Solar Intensity</span>
+                <div className="text-lg font-mono font-extrabold text-slate-100">{latest ? `${latest.light} ADC` : "--"}</div>
               </div>
             </div>
           </div>
 
-          <div className={t.telemetryCard}>
+          <div className="bg-slate-900/70 border border-slate-700 rounded-2xl p-4 flex items-center justify-between shadow-lg">
             <div className="flex items-center space-x-3">
-              <div className="p-2 bg-purple-500/10 rounded-xl border border-purple-500/20 text-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.15)]">
+              <div className="p-2.5 bg-purple-500/10 rounded-xl border border-purple-500/20 text-purple-400">
                 <Shirt className="w-5 h-5" />
               </div>
               <div>
-                <span className={t.telemetryLabel}>Clothes Weight</span>
-                <div className={t.telemetryValue}>{latest ? `${latest.weight} ADC` : "--"}</div>
+                <span className="text-xs font-semibold text-slate-400">Clothes Weight</span>
+                <div className="text-lg font-mono font-extrabold text-slate-100">{latest ? `${latest.weight} ADC` : "--"}</div>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* AI decision banner */}
-      <section className="max-w-7xl mx-auto mb-10">
-        <div className={`rounded-3xl p-6 md:p-8 relative overflow-hidden transition-all duration-300 ${t.aiBanner}`}>
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-teal-400 to-emerald-400" />
+      {/* Autonomous Decision Explanation & Satellite Radar Banner */}
+      <section className="max-w-7xl mx-auto mb-8">
+        <div className="rounded-2xl p-6 md:p-8 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800/90 border border-slate-700 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-400 via-indigo-500 to-purple-500" />
 
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-6">
             <div className="flex items-center space-x-3.5">
@@ -525,258 +470,82 @@ export default function App() {
               </div>
               <div>
                 <div className="flex items-center space-x-2">
-                  <h2 className={`text-xl md:text-2xl font-bold tracking-tight ${t.aiTitle}`}>Autonomous decision engine</h2>
-                  {systemActive ? (
-                    <span className="px-2.5 py-0.5 bg-purple-500/20 text-purple-400 text-xs font-bold rounded-full border border-purple-500/30">
-                      Active
-                    </span>
-                  ) : (
-                    <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-400 text-xs font-bold rounded-full border border-amber-500/30">
-                      Paused
-                    </span>
-                  )}
+                  <h2 className="text-xl md:text-2xl font-bold tracking-tight text-white">AI Control Engine Mirror</h2>
+                  <span className={`px-2.5 py-0.5 text-xs font-bold rounded-full border ${latest?.system_active !== false ? "bg-purple-500/20 text-purple-300 border-purple-500/30" : "bg-amber-500/20 text-amber-300 border-amber-500/30"}`}>
+                    {latest?.system_active !== false ? "Autonomous" : "Manual Override"}
+                  </span>
                 </div>
-                <p className={`text-sm mt-0.5 ${t.aiSub}`}>Synced with satellite weather radar and local house telemetry</p>
+                <p className="text-sm text-slate-400 mt-0.5">Real-time interpretation of Azure cloud decision logic</p>
               </div>
             </div>
 
-            <div
-              className={`flex items-center space-x-3 px-5 py-3 rounded-2xl border ${
-                isRainForecast ? "bg-rose-500/10 border-rose-500/30 text-rose-500 font-semibold" : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500 font-semibold"
-              }`}
-            >
+            <div className={`flex items-center space-x-3 px-5 py-3 rounded-2xl border ${isRainForecast ? "bg-rose-500/10 border-rose-500/30 text-rose-400" : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"}`}>
               <Globe className="w-6 h-6 flex-shrink-0" />
               <div>
-                <p className="text-xs uppercase tracking-wider font-bold opacity-75">Satellite radar forecast</p>
-                <p className="text-base font-extrabold">{isRainForecast ? "Storm approaching" : "Clear skies expected"}</p>
+                <p className="text-[10px] uppercase tracking-wider font-bold opacity-75">Satellite Radar Feed</p>
+                <p className="text-base font-extrabold">{isRainForecast ? "Storm System Approaching" : "Clear Skies Broadcast"}</p>
               </div>
             </div>
           </div>
 
-          <div className={`rounded-2xl p-5 md:p-6 flex items-start space-x-4 transition-all duration-300 ${t.aiCallout}`}>
-            <div className="p-2.5 bg-emerald-500/10 rounded-xl text-emerald-500 mt-0.5 flex-shrink-0">
-              <Sparkles className="w-6 h-6" />
-            </div>
+          <div className="rounded-xl p-5 bg-slate-950/80 border border-slate-800 flex items-start space-x-4">
+            <Sparkles className="w-6 h-6 text-emerald-400 flex-shrink-0 mt-0.5" />
             <div>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-500 mb-1">Why it took this action</h4>
-              <p className="text-base md:text-lg font-medium leading-relaxed italic">{explainLatestDecision()}</p>
-              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
-                <span className={`px-2.5 py-1 rounded-md border ${t.aiCodeBadge}`}>
-                  Decision code: <code className="text-purple-500 font-mono font-bold">{latest?.decision ?? "n/a"}</code>
-                </span>
-                <span className={`px-2.5 py-1 rounded-md border ${t.aiCodeBadge}`}>
-                  Dry threshold: <code className="text-emerald-500 font-mono font-bold">&lt; {DRY_WEIGHT_THRESHOLD.toLocaleString()} ADC</code>
-                </span>
-              </div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-1">State Explanation</h4>
+              <p className="text-sm md:text-base font-medium text-slate-200 leading-relaxed italic">{explainLatestDecision()}</p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Charts + manual override */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-8">
-          {/* Temperature & humidity */}
-          <div className={`p-6 md:p-8 rounded-3xl border transition-all duration-300 ${t.card}`}>
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-rose-500/10 rounded-xl border border-rose-500/20">
-                  <Thermometer className="w-6 h-6 text-rose-500" />
-                </div>
-                <div>
-                  <h3 className={`text-xl font-bold ${t.chartTitle}`}>Temperature &amp; humidity</h3>
-                  <p className={`text-xs ${t.chartSub}`}>Last {readings.length} readings</p>
-                </div>
-              </div>
-              {latest && (
-                <div className="flex items-center space-x-4 text-right">
-                  <div>
-                    <span className={`text-xs block font-semibold ${t.chartSub}`}>Temp</span>
-                    <span className="text-lg font-bold text-rose-500">{latest.temp}°C</span>
-                  </div>
-                  <div className={`h-6 w-px ${isDark ? "bg-slate-800" : "bg-slate-200"}`} />
-                  <div>
-                    <span className={`text-xs block font-semibold ${t.chartSub}`}>Humidity</span>
-                    <span className="text-lg font-bold text-sky-500">{latest.humidity}%</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={readings} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={t.chartGrid} vertical={false} />
-                  <XAxis dataKey="time" stroke={t.chartAxis} tick={{ fill: t.chartAxis, fontSize: 12 }} tickMargin={10} />
-                  <YAxis yAxisId="left" stroke="#fb7185" orientation="left" tick={{ fill: t.chartAxis, fontSize: 12 }} />
-                  <YAxis yAxisId="right" stroke="#38bdf8" orientation="right" tick={{ fill: t.chartAxis, fontSize: 12 }} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: t.chartTooltipBg,
-                      border: t.chartTooltipBorder,
-                      borderRadius: "12px",
-                      color: t.chartTooltipColor,
-                      boxShadow: isDark ? "none" : "0 10px 15px -3px rgba(0, 0, 0, 0.1)",
-                    }}
-                  />
-                  <Legend wrapperStyle={{ paddingTop: "15px" }} />
-                  <Line yAxisId="left" type="monotone" dataKey="temp" name="Temperature (°C)" stroke="#fb7185" strokeWidth={3} dot={{ r: 4, fill: t.chartTooltipBg, strokeWidth: 2 }} activeDot={{ r: 7 }} />
-                  <Line yAxisId="right" type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#38bdf8" strokeWidth={3} dot={{ r: 4, fill: t.chartTooltipBg, strokeWidth: 2 }} activeDot={{ r: 7 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Sunlight & rain */}
-          <div className={`p-6 md:p-8 rounded-3xl border transition-all duration-300 ${t.card}`}>
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-amber-500/10 rounded-xl border border-amber-500/20">
-                  <Sun className="w-6 h-6 text-amber-500" />
-                </div>
-                <div>
-                  <h3 className={`text-xl font-bold ${t.chartTitle}`}>Sunlight &amp; rain sensor</h3>
-                  <p className={`text-xs ${t.chartSub}`}>Rain reading below {WET_RAIN_THRESHOLD.toLocaleString()} ADC means moisture</p>
-                </div>
-              </div>
-              {latest && (
-                <div className="flex items-center space-x-4 text-right">
-                  <div>
-                    <span className={`text-xs block font-semibold ${t.chartSub}`}>Light</span>
-                    <span className="text-lg font-bold text-amber-500">{latest.light}</span>
-                  </div>
-                  <div className={`h-6 w-px ${isDark ? "bg-slate-800" : "bg-slate-200"}`} />
-                  <div>
-                    <span className={`text-xs block font-semibold ${t.chartSub}`}>Rain ADC</span>
-                    <span className="text-lg font-bold text-indigo-500">{latest.rain}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={readings} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={t.chartGrid} vertical={false} />
-                  <XAxis dataKey="time" stroke={t.chartAxis} tick={{ fill: t.chartAxis, fontSize: 12 }} tickMargin={10} />
-                  <YAxis stroke={t.chartAxis} domain={[0, 4500]} tick={{ fill: t.chartAxis, fontSize: 12 }} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: t.chartTooltipBg,
-                      border: t.chartTooltipBorder,
-                      borderRadius: "12px",
-                      color: t.chartTooltipColor,
-                      boxShadow: isDark ? "none" : "0 10px 15px -3px rgba(0, 0, 0, 0.1)",
-                    }}
-                  />
-                  <Legend wrapperStyle={{ paddingTop: "15px" }} />
-                  <Line type="stepAfter" dataKey="light" name="Sunlight strength" stroke="#fbbf24" strokeWidth={3} dot={false} />
-                  <Line type="stepAfter" dataKey="rain" name="Rain sensor (drops when wet)" stroke="#818cf8" strokeWidth={3} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+      {/* Historical Telemetry Charts */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">
+        <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-700 shadow-xl">
+          <h3 className="text-base font-bold text-slate-200 mb-4 flex items-center">
+            <Thermometer className="w-5 h-5 mr-2 text-rose-400" /> Temperature &amp; Humidity Trends
+          </h3>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={readings} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis dataKey="time" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                <YAxis yAxisId="left" stroke="#fb7185" orientation="left" tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                <YAxis yAxisId="right" stroke="#38bdf8" orientation="right" tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "12px", color: "#f8fafc" }} />
+                <Legend />
+                <Line yAxisId="left" type="monotone" dataKey="temp" name="Temp (°C)" stroke="#fb7185" strokeWidth={3} dot={{ r: 3 }} />
+                <Line yAxisId="right" type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#38bdf8" strokeWidth={3} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Manual override panel */}
-        <div className="space-y-6">
-          <div className={`p-6 md:p-8 rounded-3xl border sticky top-8 transition-all duration-300 ${t.manualPanel}`}>
-            <div className="flex items-center space-x-3 mb-2">
-              <ShieldAlert className="w-6 h-6 text-amber-500" />
-              <h3 className={`text-xl font-bold ${t.manualTitle}`}>Manual override</h3>
-            </div>
-            <p className={`text-xs md:text-sm mb-6 ${t.manualSub}`}>
-              Send commands straight to the ESP32, bypassing the automated decision engine.
-            </p>
-
-            <div className="space-y-6">
-              <div className="space-y-3">
-                <button
-                  onClick={() => sendCommand("all_safe", "Force everything open")}
-                  disabled={isSendingCommand}
-                  className="w-full flex items-center justify-center space-x-3 p-4 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white rounded-2xl transition-all font-bold shadow-lg shadow-emerald-600/25 active:scale-95 disabled:opacity-50 group"
-                >
-                  <Sun className="w-5 h-5 group-hover:rotate-45 transition-transform" />
-                  <span>Force everything open</span>
-                </button>
-
-                <button
-                  onClick={() => sendCommand("all_protect", "Force everything closed")}
-                  disabled={isSendingCommand}
-                  className="w-full flex items-center justify-center space-x-3 p-4 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white rounded-2xl transition-all font-bold shadow-lg shadow-rose-600/25 active:scale-95 disabled:opacity-50 group"
-                >
-                  <ShieldAlert className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                  <span>Force everything closed</span>
-                </button>
-              </div>
-
-              <div className={`h-px w-full my-2 ${isDark ? "bg-slate-800/80" : "bg-slate-200"}`} />
-
-              <div className="space-y-5">
-                <div>
-                  <label className={`text-xs font-bold uppercase tracking-wider mb-2.5 flex items-center justify-between ${t.manualSub}`}>
-                    <span>Clothesline motor</span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${motorState.clothesline === "OUTSIDE" ? "bg-amber-500/20 text-amber-500" : isDark ? "bg-slate-800 text-slate-400" : "bg-slate-200 text-slate-700"}`}>
-                      {motorState.clothesline}
-                    </span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => sendCommand("uncover_clothesline", "Extend clothesline")}
-                      disabled={isSendingCommand}
-                      className={`py-3.5 px-3 text-xs md:text-sm font-semibold rounded-xl transition-all border active:scale-95 flex flex-col items-center justify-center group ${t.manualBtn}`}
-                    >
-                      <Maximize2 className="w-4 h-4 mb-1.5 text-amber-500 group-hover:scale-110 transition-transform" />
-                      Extend outside
-                    </button>
-                    <button
-                      onClick={() => sendCommand("cover_clothesline", "Retract clothesline")}
-                      disabled={isSendingCommand}
-                      className={`py-3.5 px-3 text-xs md:text-sm font-semibold rounded-xl transition-all border active:scale-95 flex flex-col items-center justify-center group ${t.manualBtn}`}
-                    >
-                      <Minimize2 className={`w-4 h-4 mb-1.5 group-hover:scale-110 transition-transform ${isDark ? "text-slate-400" : "text-slate-600"}`} />
-                      Retract inside
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className={`text-xs font-bold uppercase tracking-wider mb-2.5 flex items-center justify-between ${t.manualSub}`}>
-                    <span>Motorized window</span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${motorState.window === "OPEN" ? "bg-teal-500/20 text-teal-500" : isDark ? "bg-slate-800 text-slate-400" : "bg-slate-200 text-slate-700"}`}>
-                      {motorState.window}
-                    </span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => sendCommand("open_window", "Open window")}
-                      disabled={isSendingCommand}
-                      className={`py-3.5 px-3 text-xs md:text-sm font-semibold rounded-xl transition-all border active:scale-95 flex flex-col items-center justify-center group ${t.manualBtn}`}
-                    >
-                      <Wind className="w-4 h-4 mb-1.5 text-teal-500 group-hover:scale-110 transition-transform" />
-                      Open (0°)
-                    </button>
-                    <button
-                      onClick={() => sendCommand("close_window", "Close window")}
-                      disabled={isSendingCommand}
-                      className={`py-3.5 px-3 text-xs md:text-sm font-semibold rounded-xl transition-all border active:scale-95 flex flex-col items-center justify-center group ${t.manualBtn}`}
-                    >
-                      <Home className="w-4 h-4 mb-1.5 text-indigo-500 group-hover:scale-110 transition-transform" />
-                      Close (90°)
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
+        <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-700 shadow-xl">
+          <h3 className="text-base font-bold text-slate-200 mb-4 flex items-center">
+            <Sun className="w-5 h-5 mr-2 text-amber-400" /> Sunlight &amp; Precipitation ADC Trends
+          </h3>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={readings} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis dataKey="time" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                <YAxis stroke="#64748b" domain={[0, 4500]} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "12px", color: "#f8fafc" }} />
+                <Legend />
+                <Line type="stepAfter" dataKey="light" name="Sunlight ADC" stroke="#fbbf24" strokeWidth={3} dot={false} />
+                <Line type="stepAfter" dataKey="rain" name="Rain ADC (Drops when wet)" stroke="#818cf8" strokeWidth={3} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
         </div>
       </div>
 
-      <footer className={`max-w-7xl mx-auto text-center mt-12 pb-8 pt-6 border-t transition-colors duration-300 ${t.footerBorder}`}>
-        <p className={`text-xs sm:text-sm ${t.footerText}`}>
-          <span className={`font-extrabold bg-clip-text text-transparent bg-gradient-to-r ${t.navTitle}`}>Sky Watch</span>{" "}
-          &bull; ESP32 telemetry &bull; Azure IoT Functions &bull; Local time:{" "}
-          <span className={`font-mono font-bold ${t.footerTime}`}>{now.toLocaleTimeString()}</span>
+      {/* Footer */}
+      <footer className="max-w-7xl mx-auto text-center pb-8 border-t border-slate-800 pt-6">
+        <p className="text-xs text-slate-500">
+          <span className="font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-sky-400 via-indigo-400 to-purple-400">Sky Watch</span>{" "}
+          &bull; Strictly Reactive Database Mirror &bull; 2000ms Polling Engine &bull; Local Time:{" "}
+          <span className="font-mono font-bold text-slate-400">{now.toLocaleTimeString()}</span>
         </p>
       </footer>
     </div>
