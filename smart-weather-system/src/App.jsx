@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   CloudSun,
   CloudRain,
@@ -30,20 +30,10 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-// Realistic fallback telemetry data used if the live Azure Function is unreachable
-const FALLBACK_READINGS = [
-  { time: "11:00", temp: 28.5, humidity: 64, light: 3200, rain: 4095, weight: 48000, satellite_rain: false, decision: "all_safe", system_active: true },
-  { time: "11:02", temp: 29.2, humidity: 65, light: 3400, rain: 4095, weight: 47500, satellite_rain: false, decision: "all_safe", system_active: true },
-  { time: "11:04", temp: 30.0, humidity: 66, light: 3500, rain: 4095, weight: 47000, satellite_rain: false, decision: "all_safe", system_active: true },
-  { time: "11:06", temp: 30.8, humidity: 68, light: 3600, rain: 4095, weight: 46500, satellite_rain: false, decision: "all_safe", system_active: true },
-  { time: "11:08", temp: 30.5, humidity: 72, light: 1200, rain: 4095, weight: 46500, satellite_rain: true, decision: "cover_clothesline", system_active: true },
-  { time: "11:10", temp: 27.5, humidity: 85, light: 300, rain: 2100, weight: 52000, satellite_rain: true, decision: "all_protect", system_active: true },
-];
-
 // ── Endpoint configuration ──────────────────────────────────────────────────
 // Note: Hardcoded for preview compatibility. In your actual Vite project, 
 // you can switch this back to: import.meta.env.VITE_API_BASE_URL ?? "http://localhost:7071"
-const API_BASE = "http://localhost:7071"; 
+const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:7071";
 const SENSOR_ENDPOINT = `${API_BASE}/api/GetSensorData`;
 const COMMAND_ENDPOINT = `${API_BASE}/api/SendCommand`;
 const POLL_INTERVAL_MS = 2_000;
@@ -55,7 +45,10 @@ const WET_RAIN_THRESHOLD = 3_000;
 
 export default function App() {
   // Telemetry history & connection state
-  const [readings, setReadings] = useState(FALLBACK_READINGS);
+  const [readings, setReadings] = useState([]);
+  const [motorState, setMotorState] = useState({ clothesline: "OUTSIDE", window: "OPEN" });
+  const overrideLock = useRef(false);
+  const lockTimeoutRef = useRef(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(new Date());
@@ -89,17 +82,33 @@ export default function App() {
             return {
               ...item,
               time: item.time ?? "00:00",
-              temp: Number(item.temp ?? 0),
-              humidity: Number(item.humidity ?? 0),
-              light: Number(item.light ?? item.light_raw ?? 0),
-              rain: Number(item.rain ?? item.rain_raw ?? 0),
-              weight: Number(rawWeight),
+              temp: Number(item.temp) || 0,
+              humidity: Number(item.humidity) || 0,
+              light: Number(item.light ?? item.light_raw) || 0,
+              rain: Number(item.rain ?? item.rain_raw) || 0,
+              weight: Number(rawWeight) || 0,
               decision: item.decision ?? "unknown",
               satellite_rain: Boolean(item.satellite_rain),
               system_active: typeof item.system_active === "boolean" ? item.system_active : true,
             };
           });
-          setReadings(clean_data);
+          const truncated_data = clean_data.slice(-20);
+          setReadings(truncated_data);
+          if (!overrideLock.current && truncated_data.length > 0) {
+            const currentLatest = truncated_data[truncated_data.length - 1];
+            setMotorState({
+              clothesline:
+                currentLatest.clothesline_state ??
+                (currentLatest.decision === "all_safe" || currentLatest.decision === "close_window"
+                  ? "OUTSIDE"
+                  : "INSIDE"),
+              window:
+                currentLatest.window_state ??
+                (currentLatest.decision === "all_safe" || currentLatest.decision === "cover_clothesline"
+                  ? "OPEN"
+                  : "CLOSED"),
+            });
+          }
           setConnectionError(null);
           setLastSyncedAt(new Date());
           setLastCommandStatus("Synchronized with cloud telemetry");
@@ -108,7 +117,7 @@ export default function App() {
         setConnectionError(`HTTP Error ${res.status}: Unable to reach hardware SENSOR API.`);
       }
     } catch {
-      setConnectionError("Hardware backend unreachable. Mirroring local offline state.");
+      setConnectionError("Hardware backend unreachable. Live telemetry offline.");
     } finally {
       setIsSyncing(false);
     }
@@ -128,6 +137,32 @@ export default function App() {
   const sendCommand = async (command, label, commandSource = "web") => {
     setIsSendingCommand(true);
     setLastCommandStatus(`Dispatching: ${label}…`);
+
+    // Optimistic local UI update and temporary override lock
+    overrideLock.current = true;
+    if (lockTimeoutRef.current) clearTimeout(lockTimeoutRef.current);
+    lockTimeoutRef.current = setTimeout(() => {
+      overrideLock.current = false;
+    }, 15_000);
+
+    setMotorState((prev) => {
+      switch (command) {
+        case "uncover_clothesline":
+          return { ...prev, clothesline: "OUTSIDE" };
+        case "cover_clothesline":
+          return { ...prev, clothesline: "INSIDE" };
+        case "open_window":
+          return { ...prev, window: "OPEN" };
+        case "close_window":
+          return { ...prev, window: "CLOSED" };
+        case "all_safe":
+          return { clothesline: "OUTSIDE", window: "OPEN" };
+        case "all_protect":
+          return { clothesline: "INSIDE", window: "CLOSED" };
+        default:
+          return prev;
+      }
+    });
 
     try {
       const res = await fetch(COMMAND_ENDPOINT, {
@@ -151,15 +186,6 @@ export default function App() {
 
   // Extract latest hardware state strictly from database
   const latest = readings.length > 0 ? readings[readings.length - 1] : undefined;
-
-  // Derive physical hardware state strictly from backend telemetry mirror
-  const clotheslineState =
-    latest?.clothesline_state ??
-    (latest?.decision === "all_safe" || latest?.decision === "close_window" ? "OUTSIDE" : "INSIDE");
-
-  const windowState =
-    latest?.window_state ??
-    (latest?.decision === "all_safe" || latest?.decision === "cover_clothesline" ? "OPEN" : "CLOSED");
 
   // 3-Tier Clothes Weight Logic
   const weightValue = latest?.weight ?? 0;
@@ -186,7 +212,7 @@ export default function App() {
       case "cover_clothesline":
         return "Clothesline pulled INSIDE to shield laundry from moisture. Window remains OPEN for room ventilation.";
       default:
-        return `Mirroring IoT state: Clothesline is ${clotheslineState}, Window is ${windowState}.`;
+        return `Mirroring IoT state: Clothesline is ${motorState.clothesline}, Window is ${motorState.window}.`;
     }
   };
 
@@ -262,13 +288,13 @@ export default function App() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-2.5">
-                <div className={`p-3 rounded-2xl border ${clotheslineState === "OUTSIDE" ? "bg-amber-500/10 text-amber-400 border-amber-500/30" : "bg-slate-800 text-slate-300 border-slate-700"}`}>
-                  {clotheslineState === "OUTSIDE" ? <Maximize2 className="w-6 h-6" /> : <Minimize2 className="w-6 h-6" />}
+                <div className={`p-3 rounded-2xl border ${motorState.clothesline === "OUTSIDE" ? "bg-amber-500/10 text-amber-400 border-amber-500/30" : "bg-slate-800 text-slate-300 border-slate-700"}`}>
+                  {motorState.clothesline === "OUTSIDE" ? <Maximize2 className="w-6 h-6" /> : <Minimize2 className="w-6 h-6" />}
                 </div>
                 <div>
                   <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Clothesline Motor</h3>
                   <p className="text-2xl font-extrabold tracking-tight mt-0.5 text-slate-100">
-                    {clotheslineState === "OUTSIDE" ? "Outside (Extended)" : "Inside (Retracted)"}
+                    {motorState.clothesline === "OUTSIDE" ? "Outside (Extended)" : "Inside (Retracted)"}
                   </p>
                 </div>
               </div>
@@ -310,13 +336,13 @@ export default function App() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-2.5">
-                <div className={`p-3 rounded-2xl border ${windowState === "OPEN" ? "bg-teal-500/10 text-teal-400 border-teal-500/30" : "bg-indigo-500/10 text-indigo-400 border-indigo-500/30"}`}>
+                <div className={`p-3 rounded-2xl border ${motorState.window === "OPEN" ? "bg-teal-500/10 text-teal-400 border-teal-500/30" : "bg-indigo-500/10 text-indigo-400 border-indigo-500/30"}`}>
                   <Home className="w-6 h-6" />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Actuated Window</h3>
                   <p className="text-2xl font-extrabold tracking-tight mt-0.5 text-slate-100">
-                    {windowState === "OPEN" ? "Open (Ventilating)" : "Closed (Sealed)"}
+                    {motorState.window === "OPEN" ? "Open (Ventilating)" : "Closed (Sealed)"}
                   </p>
                 </div>
               </div>
@@ -505,18 +531,25 @@ export default function App() {
             <Thermometer className="w-5 h-5 mr-2 text-rose-400" /> Temperature &amp; Humidity Trends
           </h3>
           <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={readings} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                <XAxis dataKey="time" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                <YAxis yAxisId="left" stroke="#fb7185" orientation="left" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                <YAxis yAxisId="right" stroke="#38bdf8" orientation="right" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "12px", color: "#f8fafc" }} />
-                <Legend />
-                <Line yAxisId="left" type="monotone" dataKey="temp" name="Temp (°C)" stroke="#fb7185" strokeWidth={3} dot={{ r: 3 }} />
-                <Line yAxisId="right" type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#38bdf8" strokeWidth={3} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
+            {readings.length === 0 ? (
+              <div className="h-full w-full flex flex-col items-center justify-center space-y-3 bg-slate-950/50 rounded-xl border border-slate-800/80 text-slate-400">
+                <RefreshCw className="w-6 h-6 animate-spin text-sky-400" />
+                <span className="text-xs font-semibold tracking-wider uppercase">Loading Live Telemetry...</span>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={readings} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                  <XAxis dataKey="time" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                  <YAxis yAxisId="left" stroke="#fb7185" orientation="left" tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                  <YAxis yAxisId="right" stroke="#38bdf8" orientation="right" tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                  <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "12px", color: "#f8fafc" }} />
+                  <Legend />
+                  <Line yAxisId="left" type="monotone" dataKey="temp" name="Temp (°C)" stroke="#fb7185" strokeWidth={3} dot={{ r: 3 }} />
+                  <Line yAxisId="right" type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#38bdf8" strokeWidth={3} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -525,17 +558,24 @@ export default function App() {
             <Sun className="w-5 h-5 mr-2 text-amber-400" /> Sunlight &amp; Precipitation ADC Trends
           </h3>
           <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={readings} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                <XAxis dataKey="time" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                <YAxis stroke="#64748b" domain={[0, 4500]} tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "12px", color: "#f8fafc" }} />
-                <Legend />
-                <Line type="stepAfter" dataKey="light" name="Sunlight ADC" stroke="#fbbf24" strokeWidth={3} dot={false} />
-                <Line type="stepAfter" dataKey="rain" name="Rain ADC (Drops when wet)" stroke="#818cf8" strokeWidth={3} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            {readings.length === 0 ? (
+              <div className="h-full w-full flex flex-col items-center justify-center space-y-3 bg-slate-950/50 rounded-xl border border-slate-800/80 text-slate-400">
+                <RefreshCw className="w-6 h-6 animate-spin text-amber-400" />
+                <span className="text-xs font-semibold tracking-wider uppercase">Loading Live Telemetry...</span>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={readings} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                  <XAxis dataKey="time" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                  <YAxis stroke="#64748b" domain={[0, 4500]} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                  <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "12px", color: "#f8fafc" }} />
+                  <Legend />
+                  <Line type="stepAfter" dataKey="light" name="Sunlight ADC" stroke="#fbbf24" strokeWidth={3} dot={false} />
+                  <Line type="stepAfter" dataKey="rain" name="Rain ADC (Drops when wet)" stroke="#818cf8" strokeWidth={3} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>
