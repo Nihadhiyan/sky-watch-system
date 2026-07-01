@@ -2,85 +2,55 @@
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 # More info on Python, GitHub Actions, and Azure Functions: https://aka.ms/python-webapps-actions
 
-name: Build and deploy Python project to Azure Function App - skywatch-backend-2026
+name: Deploy Python Backend to Azure
 
 on:
   push:
     branches:
       - main
+    # OPTIMIZATION: Only run this backend deployment if files in the backend folder change!
+    paths:
+      - 'SmartCanopyCloud/**' 
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: './SmartCanopyCloud' # set this to the path to your web app project, defaults to the repository root
-  PYTHON_VERSION: '3.11' # set this to the python version to use (supports 3.6, 3.7, 3.8)
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './SmartCanopyCloud' 
+  PYTHON_VERSION: '3.11' 
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: read #This is required for actions/checkout
+      id-token: write # Required for secure Azure login
+      contents: read  # Required to checkout the code
 
     steps:
-      - name: Checkout repository
+      - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python version
+      - name: 2. Setup Python version
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Create and start virtual environment
+      - name: 3. Install Dependencies directly into target folder
+        # Using working-directory is much safer than manual 'cd' commands
+        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
         run: |
-          python -m venv venv
-          source venv/bin/activate
+          pip install -r requirements.txt --target=".python_packages/lib/site-packages"
 
-      - name: Install dependencies
-        run: |
-         cd SmartCanopyCloud
-         pip install -r requirements.txt --target=".python_packages/lib/site-packages"
-      # Optional: Add step to run tests here
-
-      - name: Zip artifact for deployment
-        run: zip release.zip . -r -x "venv/*"
-
-      - name: Upload artifact for deployment job
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-app
-          path: |
-            release.zip
-            !venv/
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
-
-    steps:
-      - name: Download artifact from build job
-        uses: actions/download-artifact@v4
-        with:
-          name: python-app
-
-      - name: Unzip artifact for deployment
-        run: |
-          unzip release.zip
-          rm release.zip
-        
-      - name: Login to Azure
+      - name: 4. Login to Azure
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_4AFE502FDC5946FBA7A7CEE71DF085E7 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_9132CA26506D4A1B8F5A99CFA5C4F68B }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_CD87AF337A65492A88688647444375B5 }}
 
-      - name: 'Deploy to Azure Functions'
+      - name: 5. Deploy directly to Azure Functions
         uses: Azure/functions-action@v1
         id: deploy-to-function
         with:
           app-name: 'skywatch-backend-2026'
           slot-name: 'Production'
+          # This tells Azure to package and deploy ONLY this subfolder, automatically fixing the root path issue!
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          
