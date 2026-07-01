@@ -1,3 +1,4 @@
 azure-functions
 azure-iot-hub
 requests
+azure-data-tables
