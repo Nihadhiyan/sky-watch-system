@@ -31,9 +31,11 @@ import {
 } from "recharts";
 
 // ── Endpoint configuration ──────────────────────────────────────────────────
-// Note: Hardcoded for preview compatibility. In your actual Vite project, 
+// Note: Hardcoded for preview compatibility. In your actual Vite project,
 // you can switch this back to: import.meta.env.VITE_API_BASE_URL ?? "http://localhost:7071"
-const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:7071";
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ??
+  "http://localhost:7071";
 const SENSOR_ENDPOINT = `${API_BASE}/api/GetSensorData`;
 const COMMAND_ENDPOINT = `${API_BASE}/api/SendCommand`;
 const POLL_INTERVAL_MS = 2_000;
@@ -46,7 +48,10 @@ const WET_RAIN_THRESHOLD = 3_000;
 export default function App() {
   // Telemetry history & connection state
   const [readings, setReadings] = useState([]);
-  const [motorState, setMotorState] = useState({ clothesline: "OUTSIDE", window: "OPEN" });
+  const [motorState, setMotorState] = useState({
+    clothesline: "OUTSIDE",
+    window: "OPEN",
+  });
   const overrideLock = useRef(false);
   const lockTimeoutRef = useRef(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -56,7 +61,9 @@ export default function App() {
 
   // Command feedback tracking
   const [isSendingCommand, setIsSendingCommand] = useState(false);
-  const [lastCommandStatus, setLastCommandStatus] = useState("Monitoring hardware state");
+  const [lastCommandStatus, setLastCommandStatus] = useState(
+    "Monitoring hardware state",
+  );
 
   // Tick the clock every second
   useEffect(() => {
@@ -74,11 +81,13 @@ export default function App() {
         if (Array.isArray(data) && data.length > 0) {
           const clean_data = data.map((item) => {
             const rawWeight =
-              item.weight !== undefined && item.weight !== null && item.weight !== 0
+              item.weight !== undefined &&
+              item.weight !== null &&
+              item.weight !== 0
                 ? item.weight
                 : item.weight_raw !== undefined && item.weight_raw !== null
-                ? item.weight_raw
-                : item.weight ?? 0;
+                  ? item.weight_raw
+                  : (item.weight ?? 0);
             return {
               ...item,
               time: item.time ?? "00:00",
@@ -89,7 +98,10 @@ export default function App() {
               weight: Number(rawWeight) || 0,
               decision: item.decision ?? "unknown",
               satellite_rain: Boolean(item.satellite_rain),
-              system_active: typeof item.system_active === "boolean" ? item.system_active : true,
+              system_active:
+                typeof item.system_active === "boolean"
+                  ? item.system_active
+                  : true,
             };
           });
           const truncated_data = clean_data.slice(-20);
@@ -99,12 +111,14 @@ export default function App() {
             setMotorState({
               clothesline:
                 currentLatest.clothesline_state ??
-                (currentLatest.decision === "all_safe" || currentLatest.decision === "close_window"
+                (currentLatest.decision === "all_safe" ||
+                currentLatest.decision === "close_window"
                   ? "OUTSIDE"
                   : "INSIDE"),
               window:
                 currentLatest.window_state ??
-                (currentLatest.decision === "all_safe" || currentLatest.decision === "cover_clothesline"
+                (currentLatest.decision === "all_safe" ||
+                currentLatest.decision === "cover_clothesline"
                   ? "OPEN"
                   : "CLOSED"),
             });
@@ -114,10 +128,14 @@ export default function App() {
           setLastCommandStatus("Synchronized with cloud telemetry");
         }
       } else {
-        setConnectionError(`HTTP Error ${res.status}: Unable to reach hardware SENSOR API.`);
+        setConnectionError(
+          `HTTP Error ${res.status}: Unable to reach hardware SENSOR API.`,
+        );
       }
     } catch {
-      setConnectionError("Hardware backend unreachable. Live telemetry offline.");
+      setConnectionError(
+        "Hardware backend unreachable. Live telemetry offline.",
+      );
     } finally {
       setIsSyncing(false);
     }
@@ -169,7 +187,11 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // Passing our custom source to trick the ESP32 into not pausing the AI for individual motors
-        body: JSON.stringify({ command, device_id: "esp32-weather", source: commandSource }),
+        body: JSON.stringify({
+          command,
+          device_id: "esp32-weather",
+          source: commandSource,
+        }),
       });
       if (res.ok) {
         setLastCommandStatus(`Sent "${label}". Awaiting hardware response…`);
@@ -185,7 +207,8 @@ export default function App() {
   };
 
   // Extract latest hardware state strictly from database
-  const latest = readings.length > 0 ? readings[readings.length - 1] : undefined;
+  const latest =
+    readings.length > 0 ? readings[readings.length - 1] : undefined;
 
   // 3-Tier Clothes Weight Logic
   const weightValue = latest?.weight ?? 0;
@@ -200,12 +223,16 @@ export default function App() {
     if (!latest) return "Waiting for hardware telemetry broadcast...";
     switch (latest.decision) {
       case "all_safe":
-        if (!hasClothes) return "Clear skies detected. Clothesline is OUTSIDE and window is OPEN for fresh airflow.";
-        if (isDry) return "Optimal drying conditions. Clothes are dry on the line outside. Window stays OPEN.";
+        if (!hasClothes)
+          return "Clear skies detected. Clothesline is OUTSIDE and window is OPEN for fresh airflow.";
+        if (isDry)
+          return "Optimal drying conditions. Clothes are dry on the line outside. Window stays OPEN.";
         return "Weather is clear. Clothes drying outside. Window is OPEN.";
       case "all_protect":
-        if (!hasClothes) return "Adverse weather or precipitation detected. House sealed with window CLOSED and line pulled INSIDE.";
-        if (isDry) return "Rain approaching. Dry laundry pulled INSIDE safely. Window CLOSED.";
+        if (!hasClothes)
+          return "Adverse weather or precipitation detected. House sealed with window CLOSED and line pulled INSIDE.";
+        if (isDry)
+          return "Rain approaching. Dry laundry pulled INSIDE safely. Window CLOSED.";
         return "Storm protection active. Clothesline retracted INSIDE and window CLOSED.";
       case "close_window":
         return "Laundry drying OUTSIDE in clear conditions, but window is CLOSED to prevent humidity ingress.";
@@ -224,7 +251,9 @@ export default function App() {
           <div className="flex items-center space-x-3">
             <AlertTriangle className="w-6 h-6 text-rose-400 flex-shrink-0 animate-pulse" />
             <div>
-              <p className="text-sm font-bold">Hardware Connection Interrupted</p>
+              <p className="text-sm font-bold">
+                Hardware Connection Interrupted
+              </p>
               <p className="text-xs text-rose-300/90">{connectionError}</p>
             </div>
           </div>
@@ -256,7 +285,9 @@ export default function App() {
 
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-slate-950/80 border border-slate-700/80 text-xs text-slate-400 shadow-inner">
-              <RefreshCw className={`w-3.5 h-3.5 text-sky-400 ${isSyncing ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`w-3.5 h-3.5 text-sky-400 ${isSyncing ? "animate-spin" : ""}`}
+              />
               <span>Polling: 2s interval</span>
               <span className="text-slate-600">|</span>
               <span>Sync: {lastSyncedAt.toLocaleTimeString()}</span>
@@ -268,8 +299,8 @@ export default function App() {
                   connectionError
                     ? "bg-rose-500 animate-pulse"
                     : isSendingCommand
-                    ? "bg-amber-400 animate-ping"
-                    : "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]"
+                      ? "bg-amber-400 animate-ping"
+                      : "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]"
                 }`}
               />
               <span className="text-xs font-semibold text-slate-300 tracking-wide">
@@ -282,19 +313,28 @@ export default function App() {
 
       {/* Responsive Grid Layout: 3 Columns for Motors & Weather Override */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        
         {/* Mirror Card 1: Clothesline Status & Position */}
         <div className="rounded-2xl p-6 bg-slate-900/80 border border-slate-700 shadow-xl flex flex-col justify-between transition-all hover:border-slate-600">
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-2.5">
-                <div className={`p-3 rounded-2xl border ${motorState.clothesline === "OUTSIDE" ? "bg-amber-500/10 text-amber-400 border-amber-500/30" : "bg-slate-800 text-slate-300 border-slate-700"}`}>
-                  {motorState.clothesline === "OUTSIDE" ? <Maximize2 className="w-6 h-6" /> : <Minimize2 className="w-6 h-6" />}
+                <div
+                  className={`p-3 rounded-2xl border ${motorState.clothesline === "OUTSIDE" ? "bg-amber-500/10 text-amber-400 border-amber-500/30" : "bg-slate-800 text-slate-300 border-slate-700"}`}
+                >
+                  {motorState.clothesline === "OUTSIDE" ? (
+                    <Maximize2 className="w-6 h-6" />
+                  ) : (
+                    <Minimize2 className="w-6 h-6" />
+                  )}
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Clothesline Motor</h3>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+                    Clothesline Motor
+                  </h3>
                   <p className="text-2xl font-extrabold tracking-tight mt-0.5 text-slate-100">
-                    {motorState.clothesline === "OUTSIDE" ? "Outside (Extended)" : "Inside (Retracted)"}
+                    {motorState.clothesline === "OUTSIDE"
+                      ? "Outside (Extended)"
+                      : "Inside (Retracted)"}
                   </p>
                 </div>
               </div>
@@ -304,8 +344,14 @@ export default function App() {
               <span className="text-slate-400 flex items-center">
                 <Shirt className="w-4 h-4 mr-1.5 text-purple-400" /> Status:
               </span>
-              <span className={`px-2 py-1 rounded-md font-bold border ${!hasClothes ? "bg-slate-800 text-slate-400 border-slate-700" : isDry ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-sky-500/10 text-sky-400 border-sky-500/30"}`}>
-                {!hasClothes ? "Empty Line" : isDry ? "Clothes Dry" : "Clothes Wet"}
+              <span
+                className={`px-2 py-1 rounded-md font-bold border ${!hasClothes ? "bg-slate-800 text-slate-400 border-slate-700" : isDry ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-sky-500/10 text-sky-400 border-sky-500/30"}`}
+              >
+                {!hasClothes
+                  ? "Empty Line"
+                  : isDry
+                    ? "Clothes Dry"
+                    : "Clothes Wet"}
               </span>
             </div>
           </div>
@@ -313,7 +359,13 @@ export default function App() {
           <div className="mt-6 pt-4 border-t border-slate-800 grid grid-cols-2 gap-3">
             {/* NOTE: Sent as "web_individual" so AI does NOT pause! */}
             <button
-              onClick={() => sendCommand("uncover_clothesline", "Extend Clothesline", "web_individual")}
+              onClick={() =>
+                sendCommand(
+                  "uncover_clothesline",
+                  "Extend Clothesline",
+                  "web_individual",
+                )
+              }
               disabled={isSendingCommand}
               className="py-3 px-3 rounded-xl bg-slate-950/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-slate-200 transition-all flex items-center justify-center space-x-2 active:scale-95 disabled:opacity-50"
             >
@@ -321,7 +373,13 @@ export default function App() {
               <span>Extend</span>
             </button>
             <button
-              onClick={() => sendCommand("cover_clothesline", "Retract Clothesline", "web_individual")}
+              onClick={() =>
+                sendCommand(
+                  "cover_clothesline",
+                  "Retract Clothesline",
+                  "web_individual",
+                )
+              }
               disabled={isSendingCommand}
               className="py-3 px-3 rounded-xl bg-slate-950/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-slate-200 transition-all flex items-center justify-center space-x-2 active:scale-95 disabled:opacity-50"
             >
@@ -336,13 +394,19 @@ export default function App() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-2.5">
-                <div className={`p-3 rounded-2xl border ${motorState.window === "OPEN" ? "bg-teal-500/10 text-teal-400 border-teal-500/30" : "bg-indigo-500/10 text-indigo-400 border-indigo-500/30"}`}>
+                <div
+                  className={`p-3 rounded-2xl border ${motorState.window === "OPEN" ? "bg-teal-500/10 text-teal-400 border-teal-500/30" : "bg-indigo-500/10 text-indigo-400 border-indigo-500/30"}`}
+                >
                   <Home className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Actuated Window</h3>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+                    Actuated Window
+                  </h3>
                   <p className="text-2xl font-extrabold tracking-tight mt-0.5 text-slate-100">
-                    {motorState.window === "OPEN" ? "Open (Ventilating)" : "Closed (Sealed)"}
+                    {motorState.window === "OPEN"
+                      ? "Open (Ventilating)"
+                      : "Closed (Sealed)"}
                   </p>
                 </div>
               </div>
@@ -350,10 +414,15 @@ export default function App() {
 
             <div className="mt-4 p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs">
               <span className="text-slate-400 flex items-center">
-                <Activity className="w-4 h-4 mr-1.5 text-teal-400" /> System Mode:
+                <Activity className="w-4 h-4 mr-1.5 text-teal-400" /> System
+                Mode:
               </span>
-              <span className={`font-semibold ${latest?.system_active ? "text-purple-400" : "text-amber-400"}`}>
-                {latest?.system_active ? "AI Autonomous Active" : "Manual Override"}
+              <span
+                className={`font-semibold ${latest?.system_active ? "text-purple-400" : "text-amber-400"}`}
+              >
+                {latest?.system_active
+                  ? "AI Autonomous Active"
+                  : "Manual Override"}
               </span>
             </div>
           </div>
@@ -361,7 +430,9 @@ export default function App() {
           <div className="mt-6 pt-4 border-t border-slate-800 grid grid-cols-2 gap-3">
             {/* NOTE: Sent as "web_individual" so AI does NOT pause! */}
             <button
-              onClick={() => sendCommand("open_window", "Open Window", "web_individual")}
+              onClick={() =>
+                sendCommand("open_window", "Open Window", "web_individual")
+              }
               disabled={isSendingCommand}
               className="py-3 px-3 rounded-xl bg-slate-950/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-slate-200 transition-all flex items-center justify-center space-x-2 active:scale-95 disabled:opacity-50"
             >
@@ -369,7 +440,9 @@ export default function App() {
               <span>Open (0°)</span>
             </button>
             <button
-              onClick={() => sendCommand("close_window", "Close Window", "web_individual")}
+              onClick={() =>
+                sendCommand("close_window", "Close Window", "web_individual")
+              }
               disabled={isSendingCommand}
               className="py-3 px-3 rounded-xl bg-slate-950/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-slate-200 transition-all flex items-center justify-center space-x-2 active:scale-95 disabled:opacity-50"
             >
@@ -384,12 +457,22 @@ export default function App() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-2.5">
-                <div className={`p-3 rounded-2xl border ${isRainingLocally ? "bg-blue-500/10 text-blue-400 border-blue-500/30" : "bg-amber-500/10 text-amber-400 border-amber-500/30"}`}>
-                  {isRainingLocally ? <CloudRain className="w-6 h-6" /> : <Sun className="w-6 h-6" />}
+                <div
+                  className={`p-3 rounded-2xl border ${isRainingLocally ? "bg-blue-500/10 text-blue-400 border-blue-500/30" : "bg-amber-500/10 text-amber-400 border-amber-500/30"}`}
+                >
+                  {isRainingLocally ? (
+                    <CloudRain className="w-6 h-6" />
+                  ) : (
+                    <Sun className="w-6 h-6" />
+                  )}
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Weather Status</h3>
-                  <p className={`text-2xl font-extrabold tracking-tight mt-0.5 ${isRainingLocally ? "text-blue-400" : "text-amber-400"}`}>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+                    Weather Status
+                  </h3>
+                  <p
+                    className={`text-2xl font-extrabold tracking-tight mt-0.5 ${isRainingLocally ? "text-blue-400" : "text-amber-400"}`}
+                  >
                     {isRainingLocally ? "Raining Locally" : "Clear Skies"}
                   </p>
                 </div>
@@ -398,9 +481,12 @@ export default function App() {
 
             <div className="mt-4 p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs">
               <span className="text-slate-400 flex items-center">
-                <Globe className="w-4 h-4 mr-1.5 text-indigo-400" /> Satellite Radar:
+                <Globe className="w-4 h-4 mr-1.5 text-indigo-400" /> Satellite
+                Radar:
               </span>
-              <span className={`font-semibold ${isRainForecast ? "text-rose-400" : "text-emerald-400"}`}>
+              <span
+                className={`font-semibold ${isRainForecast ? "text-rose-400" : "text-emerald-400"}`}
+              >
                 {isRainForecast ? "Storm Approaching" : "No Rain Expected"}
               </span>
             </div>
@@ -409,7 +495,9 @@ export default function App() {
           <div className="mt-6 pt-4 border-t border-slate-800 space-y-3">
             {/* NOTE: Sent as "web" - This will RESUME the AI and open everything */}
             <button
-              onClick={() => sendCommand("all_safe", "Force everything open", "web")}
+              onClick={() =>
+                sendCommand("all_safe", "Force everything open", "web")
+              }
               disabled={isSendingCommand}
               className="w-full flex items-center justify-center space-x-2 p-3 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white rounded-xl transition-all font-bold shadow-lg shadow-emerald-600/25 active:scale-95 disabled:opacity-50"
             >
@@ -418,7 +506,9 @@ export default function App() {
             </button>
             {/* NOTE: Sent as "web" - This will PAUSE the AI and close everything */}
             <button
-              onClick={() => sendCommand("all_protect", "Force everything closed", "web")}
+              onClick={() =>
+                sendCommand("all_protect", "Force everything closed", "web")
+              }
               disabled={isSendingCommand}
               className="w-full flex items-center justify-center space-x-2 p-3 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white rounded-xl transition-all font-bold shadow-lg shadow-rose-600/25 active:scale-95 disabled:opacity-50"
             >
@@ -427,12 +517,13 @@ export default function App() {
             </button>
           </div>
         </div>
-
       </div>
 
       {/* Live Hardware Telemetry Grid */}
       <section className="max-w-7xl mx-auto mb-8">
-        <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3 px-1">IoT Telemetry Feed</h3>
+        <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3 px-1">
+          IoT Telemetry Feed
+        </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-slate-900/70 border border-slate-700 rounded-2xl p-4 flex items-center justify-between shadow-lg">
             <div className="flex items-center space-x-3">
@@ -440,8 +531,12 @@ export default function App() {
                 <Thermometer className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-xs font-semibold text-slate-400">Ambient Temp</span>
-                <div className="text-lg font-mono font-extrabold text-slate-100">{latest ? `${latest.temp} °C` : "--"}</div>
+                <span className="text-xs font-semibold text-slate-400">
+                  Ambient Temp
+                </span>
+                <div className="text-lg font-mono font-extrabold text-slate-100">
+                  {latest ? `${latest.temp} °C` : "--"}
+                </div>
               </div>
             </div>
           </div>
@@ -452,8 +547,12 @@ export default function App() {
                 <Droplets className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-xs font-semibold text-slate-400">Relative Humidity</span>
-                <div className="text-lg font-mono font-extrabold text-slate-100">{latest ? `${latest.humidity} %` : "--"}</div>
+                <span className="text-xs font-semibold text-slate-400">
+                  Relative Humidity
+                </span>
+                <div className="text-lg font-mono font-extrabold text-slate-100">
+                  {latest ? `${latest.humidity} %` : "--"}
+                </div>
               </div>
             </div>
           </div>
@@ -464,8 +563,12 @@ export default function App() {
                 <CloudSun className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-xs font-semibold text-slate-400">Solar Intensity</span>
-                <div className="text-lg font-mono font-extrabold text-slate-100">{latest ? `${latest.light} ADC` : "--"}</div>
+                <span className="text-xs font-semibold text-slate-400">
+                  Solar Intensity
+                </span>
+                <div className="text-lg font-mono font-extrabold text-slate-100">
+                  {latest ? `${latest.light} ADC` : "--"}
+                </div>
               </div>
             </div>
           </div>
@@ -476,8 +579,12 @@ export default function App() {
                 <Shirt className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-xs font-semibold text-slate-400">Clothes Weight</span>
-                <div className="text-lg font-mono font-extrabold text-slate-100">{latest ? `${latest.weight} ADC` : "--"}</div>
+                <span className="text-xs font-semibold text-slate-400">
+                  Clothes Weight
+                </span>
+                <div className="text-lg font-mono font-extrabold text-slate-100">
+                  {latest ? `${latest.weight} ADC` : "--"}
+                </div>
               </div>
             </div>
           </div>
@@ -496,20 +603,36 @@ export default function App() {
               </div>
               <div>
                 <div className="flex items-center space-x-2">
-                  <h2 className="text-xl md:text-2xl font-bold tracking-tight text-white">AI Control Engine Mirror</h2>
-                  <span className={`px-2.5 py-0.5 text-xs font-bold rounded-full border ${latest?.system_active !== false ? "bg-purple-500/20 text-purple-300 border-purple-500/30" : "bg-amber-500/20 text-amber-300 border-amber-500/30"}`}>
-                    {latest?.system_active !== false ? "Autonomous" : "Manual Override"}
+                  <h2 className="text-xl md:text-2xl font-bold tracking-tight text-white">
+                    AI Control Engine Mirror
+                  </h2>
+                  <span
+                    className={`px-2.5 py-0.5 text-xs font-bold rounded-full border ${latest?.system_active !== false ? "bg-purple-500/20 text-purple-300 border-purple-500/30" : "bg-amber-500/20 text-amber-300 border-amber-500/30"}`}
+                  >
+                    {latest?.system_active !== false
+                      ? "Autonomous"
+                      : "Manual Override"}
                   </span>
                 </div>
-                <p className="text-sm text-slate-400 mt-0.5">Real-time interpretation of Azure cloud decision logic</p>
+                <p className="text-sm text-slate-400 mt-0.5">
+                  Real-time interpretation of Azure cloud decision logic
+                </p>
               </div>
             </div>
 
-            <div className={`flex items-center space-x-3 px-5 py-3 rounded-2xl border ${isRainForecast ? "bg-rose-500/10 border-rose-500/30 text-rose-400" : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"}`}>
+            <div
+              className={`flex items-center space-x-3 px-5 py-3 rounded-2xl border ${isRainForecast ? "bg-rose-500/10 border-rose-500/30 text-rose-400" : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"}`}
+            >
               <Globe className="w-6 h-6 flex-shrink-0" />
               <div>
-                <p className="text-[10px] uppercase tracking-wider font-bold opacity-75">Satellite Radar Feed</p>
-                <p className="text-base font-extrabold">{isRainForecast ? "Storm System Approaching" : "Clear Skies Broadcast"}</p>
+                <p className="text-[10px] uppercase tracking-wider font-bold opacity-75">
+                  Satellite Radar Feed
+                </p>
+                <p className="text-base font-extrabold">
+                  {isRainForecast
+                    ? "Storm System Approaching"
+                    : "Clear Skies Broadcast"}
+                </p>
               </div>
             </div>
           </div>
@@ -517,8 +640,12 @@ export default function App() {
           <div className="rounded-xl p-5 bg-slate-950/80 border border-slate-800 flex items-start space-x-4">
             <Sparkles className="w-6 h-6 text-emerald-400 flex-shrink-0 mt-0.5" />
             <div>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-1">State Explanation</h4>
-              <p className="text-sm md:text-base font-medium text-slate-200 leading-relaxed italic">{explainLatestDecision()}</p>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-1">
+                State Explanation
+              </h4>
+              <p className="text-sm md:text-base font-medium text-slate-200 leading-relaxed italic">
+                {explainLatestDecision()}
+              </p>
             </div>
           </div>
         </div>
@@ -528,25 +655,72 @@ export default function App() {
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">
         <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-700 shadow-xl">
           <h3 className="text-base font-bold text-slate-200 mb-4 flex items-center">
-            <Thermometer className="w-5 h-5 mr-2 text-rose-400" /> Temperature &amp; Humidity Trends
+            <Thermometer className="w-5 h-5 mr-2 text-rose-400" /> Temperature
+            &amp; Humidity Trends
           </h3>
           <div className="h-64 w-full">
             {readings.length === 0 ? (
               <div className="h-full w-full flex flex-col items-center justify-center space-y-3 bg-slate-950/50 rounded-xl border border-slate-800/80 text-slate-400">
                 <RefreshCw className="w-6 h-6 animate-spin text-sky-400" />
-                <span className="text-xs font-semibold tracking-wider uppercase">Loading Live Telemetry...</span>
+                <span className="text-xs font-semibold tracking-wider uppercase">
+                  Loading Live Telemetry...
+                </span>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={readings} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                  <XAxis dataKey="time" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <YAxis yAxisId="left" stroke="#fb7185" orientation="left" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <YAxis yAxisId="right" stroke="#38bdf8" orientation="right" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "12px", color: "#f8fafc" }} />
+                <LineChart
+                  data={readings}
+                  margin={{ top: 5, right: 10, left: -20, bottom: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#1e293b"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="time"
+                    stroke="#64748b"
+                    tick={{ fill: "#94a3b8", fontSize: 12 }}
+                  />
+                  <YAxis
+                    yAxisId="left"
+                    stroke="#fb7185"
+                    orientation="left"
+                    tick={{ fill: "#94a3b8", fontSize: 12 }}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    stroke="#38bdf8"
+                    orientation="right"
+                    tick={{ fill: "#94a3b8", fontSize: 12 }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#0f172a",
+                      borderColor: "#334155",
+                      borderRadius: "12px",
+                      color: "#f8fafc",
+                    }}
+                  />
                   <Legend />
-                  <Line yAxisId="left" type="monotone" dataKey="temp" name="Temp (°C)" stroke="#fb7185" strokeWidth={3} dot={{ r: 3 }} />
-                  <Line yAxisId="right" type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#38bdf8" strokeWidth={3} dot={{ r: 3 }} />
+                  <Line
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="temp"
+                    name="Temp (°C)"
+                    stroke="#fb7185"
+                    strokeWidth={3}
+                    dot={{ r: 3 }}
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="humidity"
+                    name="Humidity (%)"
+                    stroke="#38bdf8"
+                    strokeWidth={3}
+                    dot={{ r: 3 }}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -555,24 +729,63 @@ export default function App() {
 
         <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-700 shadow-xl">
           <h3 className="text-base font-bold text-slate-200 mb-4 flex items-center">
-            <Sun className="w-5 h-5 mr-2 text-amber-400" /> Sunlight &amp; Precipitation ADC Trends
+            <Sun className="w-5 h-5 mr-2 text-amber-400" /> Sunlight &amp;
+            Precipitation ADC Trends
           </h3>
           <div className="h-64 w-full">
             {readings.length === 0 ? (
               <div className="h-full w-full flex flex-col items-center justify-center space-y-3 bg-slate-950/50 rounded-xl border border-slate-800/80 text-slate-400">
                 <RefreshCw className="w-6 h-6 animate-spin text-amber-400" />
-                <span className="text-xs font-semibold tracking-wider uppercase">Loading Live Telemetry...</span>
+                <span className="text-xs font-semibold tracking-wider uppercase">
+                  Loading Live Telemetry...
+                </span>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={readings} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                  <XAxis dataKey="time" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <YAxis stroke="#64748b" domain={[0, 4500]} tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "12px", color: "#f8fafc" }} />
+                <LineChart
+                  data={readings}
+                  margin={{ top: 5, right: 10, left: -10, bottom: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#1e293b"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="time"
+                    stroke="#64748b"
+                    tick={{ fill: "#94a3b8", fontSize: 12 }}
+                  />
+                  <YAxis
+                    stroke="#64748b"
+                    domain={[0, 4500]}
+                    tick={{ fill: "#94a3b8", fontSize: 12 }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#0f172a",
+                      borderColor: "#334155",
+                      borderRadius: "12px",
+                      color: "#f8fafc",
+                    }}
+                  />
                   <Legend />
-                  <Line type="stepAfter" dataKey="light" name="Sunlight ADC" stroke="#fbbf24" strokeWidth={3} dot={false} />
-                  <Line type="stepAfter" dataKey="rain" name="Rain ADC (Drops when wet)" stroke="#818cf8" strokeWidth={3} dot={false} />
+                  <Line
+                    type="stepAfter"
+                    dataKey="light"
+                    name="Sunlight ADC"
+                    stroke="#fbbf24"
+                    strokeWidth={3}
+                    dot={false}
+                  />
+                  <Line
+                    type="stepAfter"
+                    dataKey="rain"
+                    name="Rain ADC (Drops when wet)"
+                    stroke="#818cf8"
+                    strokeWidth={3}
+                    dot={false}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -583,9 +796,14 @@ export default function App() {
       {/* Footer */}
       <footer className="max-w-7xl mx-auto text-center pb-8 border-t border-slate-800 pt-6">
         <p className="text-xs text-slate-500">
-          <span className="font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-sky-400 via-indigo-400 to-purple-400">Sky Watch</span>{" "}
-          &bull; Strictly Reactive Database Mirror &bull; 2000ms Polling Engine &bull; Local Time:{" "}
-          <span className="font-mono font-bold text-slate-400">{now.toLocaleTimeString()}</span>
+          <span className="font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-sky-400 via-indigo-400 to-purple-400">
+            Sky Watch
+          </span>{" "}
+          &bull; Strictly Reactive Database Mirror &bull; 2000ms Polling Engine
+          &bull; Local Time:{" "}
+          <span className="font-mono font-bold text-slate-400">
+            {now.toLocaleTimeString()}
+          </span>
         </p>
       </footer>
     </div>
