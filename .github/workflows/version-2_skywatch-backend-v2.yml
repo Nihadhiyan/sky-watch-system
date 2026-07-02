@@ -1,0 +1,55 @@
+# Docs for the Azure Web Apps Deploy action: https://github.com/azure/functions-action
+# More GitHub Actions for Azure: https://github.com/Azure/actions
+# More info on Python, GitHub Actions, and Azure Functions: https://aka.ms/python-webapps-actions
+
+name: Deploy Python Backend to Azure (V2)
+
+on:
+  push:
+    branches:
+      - version-2
+    # Only run this if files in the correct folder change
+    paths:
+      - 'SmartCanopyCloud/**'
+  workflow_dispatch:
+
+env:
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './SmartCanopyCloud' 
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write 
+      contents: read
+
+    steps:
+      - name: 1. Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Python version
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 3. Install Dependencies
+        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        run: |
+          pip install -r requirements.txt --target=".python_packages/lib/site-packages"
+
+      - name: 4. Login to Azure
+        uses: azure/login@v2
+        with:
+          # IMPORTANT: Ensure these secrets exist in your GitHub repo settings for V2
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_C96C26C90DB84CBA86EBA22D466941B2 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_E11AA750053241AFA9AACE93C3843B45 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_F4FA67C8ADC34F3F900E8E67B22403BB }}
+
+      - name: 5. Deploy to Azure Functions
+        uses: Azure/functions-action@v1
+        id: deploy-to-function
+        with:
+          app-name: 'skywatch-backend-v2'
+          slot-name: 'Production'
+          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
